@@ -865,8 +865,12 @@ function groupItems() {
     (mapState.notch === 'all' || d.ear_notch === mapState.notch) &&
     (!cutoff || new Date(d.last_seen_at).getTime() >= cutoff));
   const groups = new Map();
-  const add = (lat, lng, item) => {
-    const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  // Everything, including your own exact sightings, is grouped by the same
+  // ~100 m square, so your sighting never hides under a dog's marker.
+  const add = (rawLat, rawLng, item) => {
+    const lat = Math.round(rawLat * 1000) / 1000;
+    const lng = Math.round(rawLng * 1000) / 1000;
+    const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
     if (!groups.has(key)) groups.set(key, { lat, lng, items: [] });
     groups.get(key).items.push(item);
   };
@@ -944,10 +948,13 @@ async function drawMap() {
     const hasMine = g.items.some((i) => i.kind === 'mine');
     const kind = hasDog ? 'dog' : hasMine ? 'mine' : 'pending';
     const size = kind === 'pending' ? 22 : 30;
-    const count = g.items.length > 1 ? g.items.length : '';
+    // Count dogs, not sightings: your own sighting of a dog already shown here adds no number.
+    const shownCodes = new Set(g.items.filter((i) => i.kind === 'dog').map((i) => i.code));
+    const distinct = g.items.filter((i) => !(i.kind === 'mine' && i.dog_code && shownCodes.has(i.dog_code))).length;
+    const count = distinct > 1 ? distinct : '';
     const icon = L.divIcon({
       className: 'mk-wrap',
-      html: `<span class="mk mk-${kind}">${count}</span>`,
+      html: `<span class="mk mk-${kind}${hasDog && hasMine ? ' mk-ring' : ''}">${count}</span>`,
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
     });
