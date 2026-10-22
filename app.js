@@ -97,6 +97,7 @@ window.addEventListener('popstate', () => {
 
 function show(name) {
   if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+  if (name === 'map') mapState.data = null;   // fresh data each visit, so new sightings show at once
   (screens[name] || screens.home)();
 }
 
@@ -190,10 +191,12 @@ screens.welcome = () => render(page({
   cls: 'welcome',
   body: `<div class="hero">${dogTag('PUN-0001', 'hero-tag')}</div>
          <h1>${t('welcome_title')}</h1><p class="lead">${t('welcome_lead')}</p>`,
-  actions: button('start', t('start')) + button('restore', t('have_code'), 'ghost'),
+  actions: button('start', t('start')) + button('map', t('see_map'), 'secondary') +
+    button('restore', t('have_code'), 'ghost'),
 }), {
   start: () => { afterConsent = 'nickname'; go(store.get(KEY.consent) ? 'nickname' : 'consent'); },
   restore: () => { afterConsent = 'restore'; go(store.get(KEY.consent) ? 'restore' : 'consent'); },
+  map: () => go('map'),
 });
 
 // Consent and safety (FR-03, NFR-10).
@@ -327,9 +330,11 @@ screens.home = () => {
     showBack: false,
     title: t('home_title', { name: esc(p.nickname || '') }),
     body: stats + (p.blocked ? `<p class="error">${t('home_blocked')}</p>` : ''),
-    actions: (p.blocked ? '' : button('photo', t('photograph'))) + button('mine', t('my_contrib'), 'secondary'),
+    actions: (p.blocked ? '' : button('photo', t('photograph'))) + button('map', t('see_map'), 'secondary') +
+      button('mine', t('my_contrib'), 'ghost'),
   }), {
     photo: () => startSighting('new'),
+    map: () => go('map'),
     mine: () => go('mine'),
   });
   refreshProfile();
@@ -672,7 +677,8 @@ function textScreen(field, title, label, placeholder, maxlength, next, multiline
       actions: button('next', t('next')) + button('skip', t('skip_rest'), 'ghost'),
     }), {
       next: () => { draft.newDog[field] = app.querySelector('#f').value.trim(); next(); },
-      skip: sendSighting,
+      // Keep anything already typed, even when skipping the rest.
+      skip: () => { draft.newDog[field] = app.querySelector('#f').value.trim(); sendSighting(); },
     });
   };
 }
@@ -783,11 +789,11 @@ screens.thanks = () => {
     body,
     actions: (dog ? button('more', t('add_more')) : '') +
       button('another', t('another'), dog ? 'secondary' : 'primary') +
-      button('mine', t('my_contrib'), 'ghost'),
+      button('map', t('see_map'), 'ghost'),
   }), {
     more: () => startSighting('add_more', dog),
     another: () => startSighting('new'),
-    mine: () => go('mine'),
+    map: () => go('map'),
   });
   refreshProfile();
 };
@@ -827,6 +833,236 @@ screens.mine = async () => {
 };
 
 // ---------------------------------------------------------------------
+// Public map (FR-24 to FR-27, FR-48, FR-49) and leaderboard (FR-28)
+// ---------------------------------------------------------------------
+
+const mapState = { notch: 'all', days: 0, data: null };
+
+const FILTERS_NOTCH = [['all', 'filter_all'], ['yes', 'filter_notched'], ['no', 'filter_not_notched']];
+const FILTERS_DAYS = [0, 7, 30, 90];
+
+function chip(act, value, label, on) {
+  return `<button type="button" class="fchip${on ? ' on' : ''}" data-act="${act}" data-value="${value}" aria-pressed="${on}">${label}</button>`;
+}
+
+function totalsText(s) {
+  const part = (n, key) => (n === 1 ? t(`${key}_1`) : t(`${key}_n`, { n }));
+  return [part(s.dogs || 0, 'dogs'), part(s.photos || 0, 'photos'), part(s.contributors || 0, 'contributors')].join(', ');
+}
+
+async function loadMapData() {
+  const [dogs, pending, stats] = await Promise.all([
+    api.rpc('map_dogs'), api.rpc('map_pending'), api.rpc('map_stats'),
+  ]);
+  mapState.data = { dogs: dogs || [], pending: pending || [], stats: stats || {} };
+}
+
+// Dogs in the same ~100 m square share one marker with a count.
+function groupItems() {
+  const { dogs, pending } = mapState.data;
+  const cutoff = mapState.days ? Date.now() - mapState.days * 86400000 : 0;
+  const shownDogs = dogs.filter((d) =>
+    (mapState.notch === 'all' || d.ear_notch === mapState.notch) &&
+    (!cutoff || new Date(d.last_seen_at).getTime() >= cutoff));
+  const groups = new Map();
+  const add = (lat, lng, item) => {
+    const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (!groups.has(key)) groups.set(key, { lat, lng, items: [] });
+    groups.get(key).items.push(item);
+  };
+  shownDogs.forEach((d) => add(d.lat, d.lng, { kind: 'dog', ...d }));
+  pending.forEach((p) => add(p.lat, p.lng, { kind: p.is_mine ? 'mine' : 'pending', ...p }));
+  return [...groups.values()];
+}
+
+screens.map = () => {
+  const s = mapState.data && mapState.data.stats;
+  render(`<main class="mapscreen">
+      <header class="maphead">
+        <div class="maphead-row">
+          ${stack.length > 1 ? `<button class="back" data-act="back" type="button">‹ ${t('back')}</button>` : ''}
+          <button type="button" class="btn small" data-act="leaders">${t('leaderboard')}</button>
+        </div>
+        <h1>${t('map_title')}</h1>
+        <p class="maptotals">${s ? totalsText(s) : '&nbsp;'}</p>
+        <div class="filters" role="group">
+          ${FILTERS_NOTCH.map(([v, k]) => chip('notch', v, t(k), mapState.notch === v)).join('')}
+          ${FILTERS_DAYS.map((n) => chip('days', n, n ? t('filter_days', { n }) : t('filter_any'), mapState.days === n)).join('')}
+        </div>
+        <ul class="legend">
+          <li><span class="dot dog"></span>${t('legend_dog')}</li>
+          <li><span class="dot mine"></span>${t('legend_mine')}</li>
+          <li><span class="dot pending"></span>${t('legend_pending')}</li>
+        </ul>
+      </header>
+      <div class="mapwrap">
+        <div id="bigmap" class="bigmap">${t('map_loading')}</div>
+        <button type="button" class="btn small nearme" data-act="near">${t('near_me')}</button>
+        <aside class="sheet" id="sheet" hidden></aside>
+      </div>
+    </main>`, {
+    leaders: () => go('leaders'),
+    notch: (el) => { mapState.notch = el.dataset.value; screens.map(); },
+    days: (el) => { mapState.days = Number(el.dataset.value); screens.map(); },
+    near: nearMe,
+    closesheet: closeSheet,
+  });
+  drawMap();
+};
+
+let markerLayer = null;
+let meMarker = null;
+
+async function drawMap() {
+  const keepView = mapInstance ? { center: mapInstance.getCenter(), zoom: mapInstance.getZoom() } : null;
+  if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+  let L;
+  try {
+    [L] = await Promise.all([loadLeaflet(), mapState.data ? null : loadMapData()]);
+  } catch (e) {
+    const el = app.querySelector('#bigmap');
+    if (el) el.innerHTML = `<p class="warn">${t('map_error')}</p>`;
+    return;
+  }
+  const el = app.querySelector('#bigmap');
+  if (!el || stack[stack.length - 1] !== 'map') return;
+  if (!app.querySelector('.maptotals').textContent.trim()) {
+    app.querySelector('.maptotals').textContent = totalsText(mapState.data.stats);
+  }
+  el.textContent = '';
+  mapInstance = L.map(el, { zoomControl: true });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(mapInstance);
+  markerLayer = L.layerGroup().addTo(mapInstance);
+  mapInstance.on('click', closeSheet);
+
+  const groups = groupItems();
+  for (const g of groups) {
+    const hasDog = g.items.some((i) => i.kind === 'dog');
+    const hasMine = g.items.some((i) => i.kind === 'mine');
+    const kind = hasDog ? 'dog' : hasMine ? 'mine' : 'pending';
+    const size = kind === 'pending' ? 22 : 30;
+    const count = g.items.length > 1 ? g.items.length : '';
+    const icon = L.divIcon({
+      className: 'mk-wrap',
+      html: `<span class="mk mk-${kind}">${count}</span>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+    L.marker([g.lat, g.lng], { icon, keyboard: true, title: t(`legend_${kind}`) })
+      .addTo(markerLayer)
+      .on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation(); openSheet(g); });
+  }
+
+  if (keepView) {
+    mapInstance.setView(keepView.center, keepView.zoom);
+  } else if (groups.length) {
+    mapInstance.fitBounds(L.latLngBounds(groups.map((g) => [g.lat, g.lng])), { padding: [40, 40], maxZoom: 16 });
+  } else {
+    let start = PUNE;
+    let zoom = 12;
+    try {
+      const last = JSON.parse(store.get(KEY.lastLoc) || 'null');
+      if (last && Number.isFinite(last.lat)) { start = last; zoom = 15; }
+    } catch (_) { /* ignore */ }
+    mapInstance.setView([start.lat, start.lng], zoom);
+  }
+  if (!mapState.data.dogs.length && !mapState.data.pending.length) {
+    showSheet(`<p class="empty">${t('map_empty')}</p>`);
+  }
+}
+
+function showSheet(inner) {
+  const sheet = app.querySelector('#sheet');
+  if (!sheet) return;
+  sheet.innerHTML = `<button type="button" class="sheet-close" data-act="closesheet" aria-label="${t('close')}">×</button>${inner}`;
+  sheet.hidden = false;
+}
+
+function closeSheet() {
+  const sheet = app.querySelector('#sheet');
+  if (sheet) sheet.hidden = true;
+}
+
+async function openSheet(group) {
+  const order = { dog: 0, mine: 1, pending: 2 };
+  const items = [...group.items].sort((a, b) => order[a.kind] - order[b.kind]);
+  const paint = (urls) => showSheet(`<ul class="sheet-list">${items.map((i) => {
+    if (i.kind === 'dog') {
+      const ear = i.ear_notch === 'yes' ? t('ear_yes') : i.ear_notch === 'no' ? t('ear_no') : t('ear_unknown');
+      return `<li class="sheet-item">
+          <span class="sub-img">${urls[i.thumb_path] ? `<img src="${urls[i.thumb_path]}" alt="">` : ''}</span>
+          <span class="sub-text">
+            <span class="dogcard-name">${esc(i.name || i.code)}</span>
+            ${i.name ? `<span class="sub-meta">${esc(i.code)}</span>` : ''}
+            <span class="sub-meta">${ear}</span>
+            <span class="sub-meta">${t('last_seen', { when: ago(i.last_seen_at) })} · ${i.photo_count === 1 ? t('photos_1') : t('photos_n', { n: i.photo_count })}</span>
+          </span>
+        </li>`;
+    }
+    if (i.kind === 'mine') {
+      return `<li class="sheet-item">
+          <span class="sub-img">${urls[i.thumb_path] ? `<img src="${urls[i.thumb_path]}" alt="">` : ''}</span>
+          <span class="sub-text">
+            <span class="sub-dog">${i.dog_code ? esc(i.dog_name ? `${i.dog_name} (${i.dog_code})` : i.dog_code) : t('not_identified')}</span>
+            <span class="chip review">${t('under_review')}</span>
+            <span class="sub-meta">${t('sent', { when: ago(i.created_at) })}</span>
+          </span>
+        </li>`;
+    }
+    return `<li class="sheet-item">
+        <span class="sub-img pending-img" aria-hidden="true"></span>
+        <span class="sub-text">
+          <span class="sub-dog">${t('pending_other')}</span>
+          <span class="sub-meta">${t('sent', { when: ago(i.created_at) })}</span>
+        </span>
+      </li>`;
+  }).join('')}</ul>`);
+  paint({});
+  try {
+    const urls = await api.photoUrls(items.map((i) => i.thumb_path).filter(Boolean));
+    if (stack[stack.length - 1] === 'map' && !app.querySelector('#sheet').hidden) paint(urls);
+  } catch (_) { /* photos stay blank */ }
+}
+
+async function nearMe(el) {
+  el.disabled = true;
+  const here = await getLiveLocation(8000);
+  el.disabled = false;
+  if (!here || !mapInstance) return;
+  const L = window.L;
+  if (meMarker) meMarker.remove();
+  meMarker = L.circleMarker([here.lat, here.lng], {
+    radius: 8, color: '#ffffff', weight: 3, fillColor: '#2563eb', fillOpacity: 1,
+  }).addTo(mapInstance);
+  mapInstance.setView([here.lat, here.lng], 16);
+}
+
+screens.leaders = async () => {
+  const s = mapState.data && mapState.data.stats;
+  const paint = (inner) => render(page({
+    title: t('lb_title'),
+    lead: t('lb_lead'),
+    body: (s ? `<p class="hint">${totalsText(s)}</p>` : '') + inner,
+  }));
+  paint('<div class="busy inline"><span class="spinner" aria-hidden="true"></span></div>');
+  try {
+    const rows = await api.rpc('leaderboard', { p_limit: 50 }) || [];
+    if (stack[stack.length - 1] !== 'leaders') return;
+    if (!rows.length) return paint(`<p class="empty">${t('lb_empty')}</p>`);
+    paint(`<ol class="board">${rows.map((r) => `<li class="board-row${r.is_me ? ' me' : ''}">
+        <span class="board-rank">${r.rank}</span>
+        <span class="board-name">${esc(r.nickname)} <span class="board-tag">#${esc(r.tag)}</span>${r.is_me ? ` <span class="chip ok">${t('lb_you')}</span>` : ''}</span>
+        <span class="board-count">${r.approved_count === 1 ? t('lb_count_one') : t('lb_count', { n: r.approved_count })}</span>
+      </li>`).join('')}</ol>`);
+  } catch (e) {
+    if (stack[stack.length - 1] === 'leaders') paint(`<p class="warn">${errorText(e)}</p>`);
+  }
+};
+
+// ---------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------
 
@@ -845,10 +1081,14 @@ async function init() {
       return showError(e, () => location.reload());
     }
   }
-  if (profile) { stack.push('home'); return screens.home(); }
-  if (session && store.get(KEY.consent)) { stack.push('nickname'); return screens.nickname(); }
-  stack.push('welcome');
-  screens.welcome();
+  // A shared link ending in #map opens the map straight away.
+  const wantsMap = location.hash === '#map';
+  if (wantsMap) history.replaceState({ md: 1 }, '', location.pathname + location.search);
+  if (profile) stack.push('home');
+  else if (session && store.get(KEY.consent)) stack.push('nickname');
+  else stack.push('welcome');
+  if (wantsMap) return go('map');
+  show(stack[0]);
 }
 
 init();

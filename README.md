@@ -17,6 +17,9 @@ vaccinated or need help. A school project, Phase 1.
 | `config.js` | Your Supabase Project URL and publishable key |
 | `vercel.json` | Hosting settings |
 | `database/01_setup.sql` | Run once in Supabase to create the database |
+| `database/02_map.sql` | Run once in Supabase to add the public map and leaderboard |
+
+The public map can be shared directly with a link ending in `#map`.
 
 No build step: Vercel serves these files as they are.
 
