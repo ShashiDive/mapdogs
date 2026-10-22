@@ -15,9 +15,12 @@ vaccinated or need help. A school project, Phase 1.
 | `api.js` | Talks to Supabase |
 | `styles.css` | Look and layout |
 | `config.js` | Your Supabase Project URL and publishable key |
+| `admin.html`, `admin.js` | Admin pages for the Screener and Reviewer, at `/admin` |
+| `zip.js` | Builds the export ZIP file |
 | `vercel.json` | Hosting settings |
 | `database/01_setup.sql` | Run once in Supabase to create the database |
 | `database/02_map.sql` | Run once in Supabase to add the public map and leaderboard |
+| `database/03_admin.sql` | Run once in Supabase to add the admin pages |
 
 The public map can be shared directly with a link ending in `#map`.
 

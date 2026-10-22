@@ -8,7 +8,12 @@ export const configured =
   !cfg.supabaseKey.includes('PASTE') &&
   !!window.supabase;
 
-export const sb = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey) : null;
+// The admin page keeps its login under its own name, so signing in as an
+// admin never replaces a contributor's login on the same browser.
+const storageKey = window.MAPDOGS_STORAGE_KEY;
+export const sb = configured
+  ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, storageKey ? { auth: { storageKey } } : {})
+  : null;
 
 const BUCKET = 'photos';
 
@@ -62,6 +67,13 @@ export async function uploadPhoto(path, blob) {
   if (error && !/exists|Duplicate/i.test(error.message || '') && String(error.statusCode) !== '409') {
     throw appError(error);
   }
+}
+
+// Admins only: remove photo files after a sighting is deleted in screening.
+export async function removePhotos(paths) {
+  if (!paths || !paths.length) return;
+  const { error } = await sb.storage.from(BUCKET).remove(paths);
+  if (error) throw appError(error);
 }
 
 // Photos are private; viewing needs a short-lived signed link.
