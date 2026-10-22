@@ -948,13 +948,16 @@ async function drawMap() {
     const hasMine = g.items.some((i) => i.kind === 'mine');
     const kind = hasDog ? 'dog' : hasMine ? 'mine' : 'pending';
     const size = kind === 'pending' ? 22 : 30;
-    // Count dogs, not sightings: your own sighting of a dog already shown here adds no number.
-    const shownCodes = new Set(g.items.filter((i) => i.kind === 'dog').map((i) => i.code));
-    const distinct = g.items.filter((i) => !(i.kind === 'mine' && i.dog_code && shownCodes.has(i.dog_code))).length;
+    // With recorded dogs here, the number counts dogs only; sightings under
+    // review show as a ring (yellow if yours, grey if someone else's).
+    const hasOther = g.items.some((i) => i.kind === 'pending');
+    const dogCount = g.items.filter((i) => i.kind === 'dog').length;
+    const distinct = hasDog ? dogCount : g.items.length;
     const count = distinct > 1 ? distinct : '';
+    const ring = hasDog && hasMine ? ' mk-ring' : hasDog && hasOther ? ' mk-ring-grey' : '';
     const icon = L.divIcon({
       className: 'mk-wrap',
-      html: `<span class="mk mk-${kind}${hasDog && hasMine ? ' mk-ring' : ''}">${count}</span>`,
+      html: `<span class="mk mk-${kind}${ring}">${count}</span>`,
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
     });

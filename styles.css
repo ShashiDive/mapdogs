@@ -533,6 +533,8 @@ h1:focus, h1:focus-visible { outline: none; }
 .mk-pending { background: #9aa3a0; }
 /* A recorded dog plus your own sighting under review at the same spot */
 .mk-ring { box-shadow: 0 0 0 4px var(--turmeric), 0 1px 6px rgba(0, 0, 0, 0.45); }
+/* A recorded dog plus someone else's sighting under review at the same spot */
+.mk-ring-grey { box-shadow: 0 0 0 4px #9aa3a0, 0 1px 6px rgba(0, 0, 0, 0.45); }
 
 .sheet {
   position: absolute;
