@@ -430,6 +430,45 @@ h1:focus, h1:focus-visible { outline: none; }
 
 .subs { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 12px; }
 .sub { display: flex; gap: 12px; align-items: flex-start; }
+
+/* Sighting tiles in My contributions are tappable (FR-55, NFR-26) */
+.subcard {
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+  align-items: center;
+  background: var(--leaf);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.subcard:active { background: var(--leaf-pressed); border-color: var(--neem); }
+.subcard .sub-text { flex: 1; }
+.subcard-go { font-size: 28px; line-height: 1; color: var(--neem); padding: 0 4px; }
+
+/* Sighting details */
+.detail-photos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 8px 0 4px; }
+.dphoto { margin: 0; }
+.dphoto img, .dphoto-missing {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #eef1f0;
+}
+.dphoto figcaption { margin-top: 4px; font-size: 14px; font-weight: 600; }
+.dnote { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+.details { margin: 16px 0 0; display: grid; gap: 0; }
+.details div {
+  display: grid;
+  grid-template-columns: minmax(110px, 40%) 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.details dt { color: var(--muted); }
+.details dd { margin: 0; font-weight: 600; }
 .sub-img {
   width: 64px;
   height: 64px;

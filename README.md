@@ -21,6 +21,9 @@ vaccinated or need help. A school project, Phase 1.
 | `database/01_setup.sql` | Run once in Supabase to create the database |
 | `database/02_map.sql` | Run once in Supabase to add the public map and leaderboard |
 | `database/03_admin.sql` | Run once in Supabase to add the admin pages |
+| `database/04_details.sql` | Run once in Supabase to add sighting details in My contributions |
+
+The site's address is https://www.mapdogs.in. `mapdogs.in` and the old `mapdogs.vercel.app` both redirect to it.
 
 The public map can be shared directly with a link ending in `#map`.
 

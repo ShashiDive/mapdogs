@@ -798,16 +798,22 @@ screens.thanks = () => {
   refreshProfile();
 };
 
-// My contributions (FR-29).
+const statusLabel = (s) => ({
+  screening: ['st_waiting', 'review'], review: ['st_waiting', 'review'], approved: ['st_approved', 'ok'],
+  rejected: ['st_rejected', 'no'], deleted: ['st_deleted', 'no'],
+}[s] || ['st_waiting', 'review']);
+
+let openSubmission = null;
+
+// My contributions (FR-29). Each sighting opens its details (FR-55).
 screens.mine = async () => {
-  const statusLabel = (s) => ({
-    screening: ['st_waiting', 'review'], review: ['st_waiting', 'review'], approved: ['st_approved', 'ok'],
-    rejected: ['st_rejected', 'no'], deleted: ['st_deleted', 'no'],
-  }[s] || ['st_waiting', 'review']);
   const paint = (list) => render(page({
     title: t('mine_title'),
     body: `<p class="label">${t('mine_code')}</p>${codeCard()}${list}`,
-  }), { copy: copyCode });
+  }), {
+    copy: copyCode,
+    opensub: (el) => { openSubmission = el.dataset.value; go('sighting'); },
+  });
   paint('<div class="busy inline"><span class="spinner" aria-hidden="true"></span></div>');
   try {
     const rows = await api.rpc('my_submissions', { p_limit: 100 }) || [];
@@ -817,7 +823,7 @@ screens.mine = async () => {
     paint(`<ul class="subs">${rows.map((r) => {
       const [key, tone] = statusLabel(r.status);
       const url = urls[r.thumb_path];
-      return `<li class="sub">
+      return `<li><button type="button" class="sub subcard" data-act="opensub" data-value="${r.submission_id}">
           <span class="sub-img">${url ? `<img src="${url}" alt="" loading="lazy">` : ''}</span>
           <span class="sub-text">
             <span class="sub-dog">${r.dog_code ? esc(r.dog_name ? `${r.dog_name} (${r.dog_code})` : r.dog_code) : t('unsure_dog')}</span>
@@ -825,11 +831,64 @@ screens.mine = async () => {
             <span class="chip ${tone}">${t(key)}</span>
             ${r.reject_reason ? `<span class="sub-meta">${esc(r.reject_reason)}</span>` : ''}
           </span>
-        </li>`;
+          <span class="subcard-go" aria-hidden="true">›</span>
+        </button></li>`;
     }).join('')}</ul>`);
   } catch (e) {
     if (stack[stack.length - 1] === 'mine') paint(`<p class="warn">${errorText(e)}</p>`);
   }
+};
+
+// One sighting in full: every photo and everything entered (FR-55).
+screens.sighting = async () => {
+  if (!openSubmission) return goHome();
+  const paint = (title, body, actions = '', h = {}) => render(page({ title, body, actions }), h);
+  paint('', '<div class="busy inline"><span class="spinner" aria-hidden="true"></span></div>');
+  let s;
+  let urls;
+  try {
+    s = await api.rpc('my_submission_detail', { p_id: openSubmission });
+    urls = s ? await api.photoUrls(s.photos.map((p) => p.path)) : {};
+  } catch (e) {
+    if (stack[stack.length - 1] === 'sighting') paint(t('err_title'), `<p class="warn">${errorText(e)}</p>`);
+    return;
+  }
+  if (stack[stack.length - 1] !== 'sighting') return;
+  if (!s) return paint(t('err_title'), `<p class="warn">${t('err_generic')}</p>`);
+
+  const [key, tone] = statusLabel(s.status);
+  const d = s.dog;
+  const title = d ? esc(d.name || d.code) : t('unsure_dog');
+  const answer = (v) => (v === 'yes' ? t('yes') : v === 'no' ? t('no') : v === 'unsure' ? t('cant_see') : null);
+  const rows = [
+    d && d.name ? [t('det_id'), esc(d.code)] : null,
+    [t('det_sent'), new Date(s.created_at).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })],
+    [t('det_location'), t(`det_loc_${s.location_source}`)],
+    answer(s.ear_notch) ? [t('det_ear'), answer(s.ear_notch)] : null,
+    answer(s.collar) ? [t('det_collar'), answer(s.collar)] : null,
+    answer(s.injured) ? [t('det_injured'), answer(s.injured)] : null,
+    d && d.sex ? [t('det_sex'), t(d.sex)] : null,
+    d && d.age_group ? [t('det_age'), t(d.age_group)] : null,
+    d && d.notes ? [t('det_notes'), esc(d.notes)] : null,
+  ].filter(Boolean);
+
+  const photos = s.photos.length
+    ? `<div class="detail-photos">${s.photos.map((p) => `<figure class="dphoto">
+          ${urls[p.path] ? `<img src="${urls[p.path]}" alt="${esc(t(`angle_${p.angle}`))}" loading="lazy">` : '<span class="dphoto-missing"></span>'}
+          <figcaption>${t(`angle_${p.angle}`)}${p.source === 'gallery' ? ` · ${t('det_gallery')}` : ''}
+            ${p.hidden ? `<span class="dnote">${t('det_hidden')}</span>` : ''}
+            ${p.moved_to ? `<span class="dnote">${t('det_moved', { code: esc(p.moved_to) })}</span>` : ''}</figcaption>
+        </figure>`).join('')}</div>`
+    : `<p class="hint">${t(s.status === 'deleted' ? 'det_no_photos_deleted' : 'det_no_photos')}</p>`;
+
+  const canAdd = d && ['screening', 'review', 'approved'].includes(s.status) && profile && !profile.blocked;
+  paint(title, `
+      <p><span class="chip ${tone}">${t(key)}</span></p>
+      ${s.reject_reason ? `<p class="warn">${t('det_reason', { reason: esc(s.reject_reason) })}</p>` : ''}
+      ${photos}
+      <dl class="details">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`,
+    canAdd ? button('more', t('add_more'), 'secondary') : '',
+    { more: () => startSighting('add_more', { id: d.id, code: d.code, name: d.name }) });
 };
 
 // ---------------------------------------------------------------------
